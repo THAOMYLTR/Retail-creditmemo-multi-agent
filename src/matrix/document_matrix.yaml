@@ -1,0 +1,662 @@
+# =============================================================================
+# DOCUMENT CLASSIFICATION MATRIX — RETAIL (KHÁCH HÀNG CÁ NHÂN)
+# (dossier group -> document type -> agents)
+# =============================================================================
+# THIS IS THE SOURCE OF TRUTH for document routing. Editing this file changes
+# which document reaches which agent — no Python change required.
+#
+# It describes the dossier of an INDIVIDUAL borrower (khách hàng cá nhân, KHCN):
+# identity and residence papers, proof of income, the loan application with
+# its repayment plan, the purpose documents (house/car purchase contract), the
+# collateral papers, CIC reports and the bank's own appraisal/verification
+# report.
+#
+# --- How to read a `type` ----------------------------------------------------
+#   id        : technical key, never changed (it is written into logs/monitoring).
+#   label     : the document line as it appears on the dossier checklist.
+#   short_label : a caption for the reader of the finished memo.
+#   keywords  : terms that identify this type from the FILENAME and the CONTENT.
+#               Written unaccented and lowercase. The system strips accents and
+#               lowercases both keywords and text before comparing, so accented
+#               spellings work too; unaccented is the convention here so the form
+#               actually being compared is visible.
+#               A filename hit scores 3x a content hit.
+#   agents    : which agents use this type, with an R/O level.
+#                 R = Required — core evidence, gets budget priority.
+#                 O = Optional — used when present, ranked after R.
+#               A scalar value (`R`) = identical across all loan products.
+#               A map value = per-product, and MUST list every product.
+#   requirement : "Cấp mới"/"Tái cấp" columns of the checklist. NOT wired into
+#               any logic yet; kept for a future missing-document checklist.
+#   income_extraction : true = run the proof-of-income pass that turns the
+#               document into a structured monthly income record
+#               (src/agents/income_extraction.py). Feeds the affordability
+#               calculator (DTI/DSR) and the debt/income chart.
+#   proposal_extraction : true = extract the loan application / repayment plan
+#               (src/agents/proposal_extraction.py).
+#   cic_s10a_extraction : true = extract the CIC credit report of the borrower
+#               (src/agents/cic_s10a_extraction.py). The flag keeps its original
+#               name; it now covers the individual credit report as well.
+#   cic_r21_extraction : true = extract the CIC loan-collateral report
+#               (src/agents/cic_r21_extraction.py).
+#   sitevisit_extraction : true = extract the appraisal / field verification
+#               report (src/agents/sitevisit_extraction.py).
+#               EACH flag costs one extra LLM call per matching document.
+#
+# --- Choosing the primary agent ----------------------------------------------
+# `primary_agent` is declared at group level and applies to every type in the
+# group. When that agent is absent from a type's `agents`, the first R-level
+# agent wins, in the order CP > CR > IA > PF > RA (see PRIMARY_AGENT_PRECEDENCE
+# in document_matrix.py). It can be overridden per type.
+# =============================================================================
+
+version: 1
+
+# The retail loan products. Each column decides how strongly a document is
+# needed for that product: a land-use-right certificate is core evidence for a
+# mortgage and merely supporting for an unsecured consumer loan.
+#
+# `aliases` = how a user might name the product in a question. The system looks
+# for these phrases in the prompt to pick the right column (see
+# detect_loan_program). Aliases are normalised exactly like document keywords:
+# accents stripped, lowercased, every non-alphanumeric character turned into a
+# space. Matching is whole-token. An alias may point at only one product; a
+# duplicate is an error at load time.
+#
+# The same ids key src/policy/retail_products.yaml, which holds each product's
+# policy limits (max DSR, max LTV, max tenor...).
+loan_programs:
+  - id: TIEU_DUNG
+    label: "Vay tiêu dùng tín chấp"
+    aliases: ["tin chap", "vay tin chap", "tieu dung tin chap", "vay tieu dung", "unsecured", "personal loan"]
+  - id: MUA_NHA
+    label: "Vay mua nhà / bất động sản"
+    aliases: ["mua nha", "vay mua nha", "mua can ho", "mua dat", "mua bat dong san", "vay mua bat dong san", "xay sua nha", "mortgage", "home loan"]
+  - id: MUA_O_TO
+    label: "Vay mua ô tô"
+    aliases: ["mua o to", "vay mua o to", "mua oto", "mua xe", "vay mua xe", "auto loan", "car loan"]
+  - id: HO_KINH_DOANH
+    label: "Vay hộ kinh doanh"
+    aliases: ["ho kinh doanh", "vay ho kinh doanh", "hkd", "tieu thuong", "vay kinh doanh ca nhan"]
+
+groups:
+
+  # ===========================================================================
+  - id: ho_so_nhan_than
+    stt: "I"
+    label: "Hồ sơ nhân thân"
+    primary_agent: CUSTOMER_PROFILE_AGENT
+    types:
+
+      - id: giay_to_tuy_than
+        stt: "I.1"
+        short_label: "Giấy tờ tùy thân"
+        label: >-
+          CCCD/CMND/Hộ chiếu còn hiệu lực của khách hàng vay, người đồng vay
+          (vợ/chồng) và người bảo lãnh (nếu có)
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Nếu có thay đổi"
+        agents:
+          CUSTOMER_PROFILE_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "can cuoc cong dan"
+          - "the can cuoc"
+          - "cccd"
+          - "can cuoc"
+          - "chung minh nhan dan"
+          - "cmnd"
+          - "ho chieu"
+          - "so dinh danh ca nhan"
+          - "citizen identity"
+          - "passport"
+
+      - id: xac_nhan_cu_tru
+        stt: "I.2"
+        short_label: "Xác nhận thông tin cư trú"
+        label: >-
+          Giấy xác nhận thông tin về cư trú (mẫu CT07)/Sổ hộ khẩu/Sổ tạm trú
+          hoặc thông tin cư trú trên VNeID
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Nếu có thay đổi"
+        agents:
+          CUSTOMER_PROFILE_AGENT: R
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "xac nhan thong tin ve cu tru"
+          - "xac nhan cu tru"
+          - "thong tin cu tru"
+          - "ct07"
+          - "so ho khau"
+          - "ho khau"
+          - "so tam tru"
+          - "tam tru"
+          - "thuong tru"
+          - "noi cu tru"
+          - "vneid"
+
+      - id: tinh_trang_hon_nhan
+        stt: "I.3"
+        short_label: "Giấy tờ tình trạng hôn nhân"
+        label: >-
+          Giấy chứng nhận đăng ký kết hôn/Giấy xác nhận tình trạng hôn nhân/
+          Quyết định ly hôn (nếu có)
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Nếu có thay đổi"
+        agents:
+          CUSTOMER_PROFILE_AGENT: R
+          CREDIT_PROPOSAL_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "giay chung nhan dang ky ket hon"
+          - "dang ky ket hon"
+          - "giay ket hon"
+          - "xac nhan tinh trang hon nhan"
+          - "tinh trang hon nhan"
+          - "doc than"
+          - "quyet dinh ly hon"
+          - "ly hon"
+
+  # ===========================================================================
+  - id: ho_so_thu_nhap
+    stt: "II"
+    label: "Hồ sơ chứng minh thu nhập"
+    primary_agent: INCOME_ANALYSIS_AGENT
+    types:
+
+      - id: hop_dong_lao_dong
+        stt: "II.1"
+        short_label: "Hợp đồng lao động / xác nhận công tác"
+        label: >-
+          Hợp đồng lao động còn hiệu lực/Quyết định bổ nhiệm, tuyển dụng/
+          Giấy xác nhận công tác của đơn vị sử dụng lao động
+        requirement:
+          cap_moi: "Bắt buộc với KH có thu nhập từ lương"
+          tai_cap: "Nếu có thay đổi"
+        income_extraction: true
+        agents:
+          INCOME_ANALYSIS_AGENT: R
+          CUSTOMER_PROFILE_AGENT: R
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "hop dong lao dong"
+          - "hdld"
+          - "phu luc hop dong lao dong"
+          - "quyet dinh bo nhiem"
+          - "quyet dinh tuyen dung"
+          - "xac nhan cong tac"
+          - "giay xac nhan cong tac"
+          - "labor contract"
+          - "employment contract"
+
+      - id: xac_nhan_luong
+        stt: "II.2"
+        short_label: "Xác nhận lương / bảng lương"
+        label: >-
+          Giấy xác nhận thu nhập/Xác nhận lương của đơn vị công tác; Bảng lương,
+          phiếu lương 03-06 tháng gần nhất
+        requirement:
+          cap_moi: "Bắt buộc với KH có thu nhập từ lương"
+          tai_cap: "Bắt buộc với KH có thu nhập từ lương"
+        income_extraction: true
+        agents:
+          INCOME_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "giay xac nhan thu nhap"
+          - "xac nhan thu nhap"
+          - "xac nhan luong"
+          - "xac nhan muc luong"
+          # How an employer's letter phrases it; a labour contract does not.
+          - "hien dang cong tac"
+          - "bang luong"
+          - "phieu luong"
+          - "bang thanh toan luong"
+          - "bang ke luong"
+          - "salary confirmation"
+          - "payslip"
+
+      - id: sao_ke_tai_khoan
+        stt: "II.3"
+        short_label: "Sao kê tài khoản"
+        label: >-
+          Sao kê tài khoản nhận lương/tài khoản thanh toán của khách hàng tại
+          TCTD 03-06 tháng gần nhất
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        income_extraction: true
+        agents:
+          INCOME_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: O
+        keywords:
+          - "sao ke tai khoan"
+          - "sao ke ngan hang"
+          - "sao ke luong"
+          - "sao ke"
+          - "lich su giao dich"
+          - "bank statement"
+          - "account statement"
+          - "so du dau ky"
+          - "so du cuoi ky"
+          - "phat sinh no"
+          - "phat sinh co"
+
+      - id: thue_thu_nhap_ca_nhan
+        stt: "II.4"
+        short_label: "Chứng từ thuế thu nhập cá nhân"
+        label: >-
+          Tờ khai quyết toán thuế TNCN/Chứng từ khấu trừ thuế TNCN năm gần nhất
+        requirement:
+          cap_moi: "Khuyến khích"
+          tai_cap: "Khuyến khích"
+        income_extraction: true
+        agents:
+          INCOME_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "quyet toan thue thu nhap ca nhan"
+          - "thue thu nhap ca nhan"
+          - "thue tncn"
+          - "tncn"
+          - "qtt tncn"
+          - "to khai quyet toan thue"
+          - "chung tu khau tru thue"
+          - "personal income tax"
+
+      - id: hop_dong_cho_thue
+        stt: "II.5"
+        short_label: "Hợp đồng cho thuê tài sản"
+        label: >-
+          Hợp đồng cho thuê nhà/căn hộ/mặt bằng/xe và chứng từ nhận tiền thuê
+          (nguồn thu nhập từ cho thuê tài sản)
+        requirement:
+          cap_moi: "Bắt buộc với KH có thu nhập cho thuê"
+          tai_cap: "Bắt buộc với KH có thu nhập cho thuê"
+        income_extraction: true
+        agents:
+          INCOME_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "hop dong cho thue"
+          - "cho thue nha"
+          - "cho thue can ho"
+          - "cho thue mat bang"
+          - "cho thue xe"
+          - "hop dong thue nha"
+          - "hop dong thue tai san"
+          - "ben cho thue"
+          - "tien thue hang thang"
+
+      - id: ho_so_ho_kinh_doanh
+        stt: "II.6"
+        short_label: "Hồ sơ hộ kinh doanh"
+        label: >-
+          Giấy chứng nhận đăng ký hộ kinh doanh; Thông báo thuế khoán/tờ khai
+          thuế hộ kinh doanh; sổ sách ghi chép doanh thu, chi phí
+        requirement:
+          cap_moi: "Bắt buộc với KH có thu nhập từ hộ kinh doanh"
+          tai_cap: "Bắt buộc với KH có thu nhập từ hộ kinh doanh"
+        income_extraction: true
+        # Core evidence for the household-business product, supporting for the
+        # rest: a salaried borrower may still run a shop on the side.
+        agents:
+          INCOME_ANALYSIS_AGENT:  {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: O, HO_KINH_DOANH: R}
+          CUSTOMER_PROFILE_AGENT: {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: O, HO_KINH_DOANH: R}
+          RISK_ASSESSMENT_AGENT:  {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: O, HO_KINH_DOANH: R}
+        keywords:
+          - "giay chung nhan dang ky ho kinh doanh"
+          - "dang ky ho kinh doanh"
+          - "ho kinh doanh"
+          - "thue khoan"
+          - "thong bao thue"
+          - "so ban hang"
+          - "so doanh thu"
+          - "so theo doi doanh thu"
+          - "so ghi chep doanh thu"
+
+      - id: thu_nhap_tai_san_khac
+        stt: "II.7"
+        short_label: "Chứng từ tài sản, thu nhập khác"
+        label: >-
+          Sổ tiết kiệm/xác nhận số dư tiền gửi; quyết định hưởng lương hưu;
+          chứng từ cổ tức, lợi nhuận được chia và các nguồn thu nhập khác
+        requirement:
+          cap_moi: "Khuyến khích"
+          tai_cap: "Khuyến khích"
+        income_extraction: true
+        agents:
+          INCOME_ANALYSIS_AGENT: O
+          CREDIT_PROPOSAL_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "so tiet kiem"
+          - "xac nhan so du"
+          - "tien gui tiet kiem"
+          - "luong huu"
+          - "huong che do huu tri"
+          - "co tuc"
+          - "loi nhuan duoc chia"
+          - "thu nhap khac"
+
+  # ===========================================================================
+  - id: ho_so_vay_von
+    stt: "III"
+    label: "Hồ sơ phương án vay vốn"
+    primary_agent: CREDIT_PROPOSAL_AGENT
+    types:
+
+      - id: de_nghi_vay_von
+        stt: "III.1"
+        short_label: "Giấy đề nghị vay vốn kiêm phương án trả nợ"
+        label: >-
+          Giấy đề nghị vay vốn kiêm phương án sử dụng vốn và phương án trả nợ
+          của khách hàng cá nhân
+        # Purpose, amount, tenor, repayment method, declared incomes, living
+        # costs, existing debt payments and the collateral offered — see
+        # src/agents/proposal_extraction.py.
+        proposal_extraction: true
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          CUSTOMER_PROFILE_AGENT: R
+          INCOME_ANALYSIS_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "giay de nghi vay von"
+          - "de nghi vay von"
+          - "de nghi cap tin dung"
+          - "giay de nghi kiem phuong an"
+          - "phuong an tra no"
+          - "phuong an vay von"
+          - "phuong an su dung von"
+          - "nguon tra no"
+          - "loan application"
+
+      - id: hop_dong_mua_ban_nha_dat
+        stt: "III.2"
+        short_label: "Hợp đồng mua bán nhà đất"
+        label: >-
+          Hợp đồng mua bán/đặt cọc/chuyển nhượng nhà ở, căn hộ, quyền sử dụng
+          đất; dự toán và giấy phép xây dựng (vay xây sửa nhà)
+        requirement:
+          cap_moi: "Bắt buộc với vay mua/xây sửa nhà"
+          tai_cap: "Không bắt buộc"
+        agents:
+          CREDIT_PROPOSAL_AGENT:  {TIEU_DUNG: O, MUA_NHA: R, MUA_O_TO: O, HO_KINH_DOANH: O}
+          RISK_ASSESSMENT_AGENT:  {TIEU_DUNG: O, MUA_NHA: R, MUA_O_TO: O, HO_KINH_DOANH: O}
+          CUSTOMER_PROFILE_AGENT: O
+        keywords:
+          - "hop dong mua ban nha"
+          - "hop dong mua ban can ho"
+          - "hop dong mua ban bat dong san"
+          - "hop dong chuyen nhuong quyen su dung dat"
+          - "chuyen nhuong quyen su dung dat"
+          - "hop dong dat coc"
+          - "dat coc"
+          - "du toan xay dung"
+          - "giay phep xay dung"
+
+      - id: hop_dong_mua_ban_xe
+        stt: "III.3"
+        short_label: "Hợp đồng mua bán xe"
+        label: >-
+          Hợp đồng mua bán/đặt mua ô tô, báo giá, hóa đơn của đại lý (vay mua ô tô)
+        requirement:
+          cap_moi: "Bắt buộc với vay mua ô tô"
+          tai_cap: "Không bắt buộc"
+        agents:
+          CREDIT_PROPOSAL_AGENT:  {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: R, HO_KINH_DOANH: O}
+          RISK_ASSESSMENT_AGENT:  {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: R, HO_KINH_DOANH: O}
+        keywords:
+          - "hop dong mua ban xe"
+          - "hop dong mua ban o to"
+          - "hop dong mua xe"
+          - "don dat hang xe"
+          - "bao gia xe"
+          - "dai ly o to"
+          - "so khung"
+          - "so may"
+
+      - id: chung_tu_muc_dich_khac
+        stt: "III.4"
+        short_label: "Chứng từ chứng minh mục đích vay"
+        label: >-
+          Hóa đơn, báo giá, hợp đồng mua hàng hóa/dịch vụ, chứng từ học phí,
+          viện phí... chứng minh mục đích sử dụng vốn
+        requirement:
+          cap_moi: "Khuyến khích"
+          tai_cap: "Khuyến khích"
+        agents:
+          CREDIT_PROPOSAL_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "chung tu chung minh muc dich"
+          - "hop dong mua hang"
+          - "hop dong cung cap dich vu"
+          - "hoa don"
+          - "bao gia"
+          - "hoc phi"
+          - "vien phi"
+
+  # ===========================================================================
+  - id: ho_so_tai_san_bao_dam
+    stt: "IV"
+    label: "Hồ sơ tài sản bảo đảm"
+    primary_agent: RISK_ASSESSMENT_AGENT
+    types:
+
+      - id: giay_chung_nhan_qsdd
+        stt: "IV.1"
+        short_label: "Giấy chứng nhận quyền sử dụng đất"
+        label: >-
+          Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản gắn
+          liền với đất (sổ đỏ/sổ hồng) của tài sản bảo đảm
+        requirement:
+          cap_moi: "Bắt buộc với khoản vay có TSBĐ là BĐS"
+          tai_cap: "Nếu có thay đổi"
+        agents:
+          CREDIT_PROPOSAL_AGENT: {TIEU_DUNG: O, MUA_NHA: R, MUA_O_TO: O, HO_KINH_DOANH: O}
+          RISK_ASSESSMENT_AGENT: {TIEU_DUNG: O, MUA_NHA: R, MUA_O_TO: O, HO_KINH_DOANH: O}
+        keywords:
+          - "giay chung nhan quyen su dung dat"
+          - "quyen su dung dat"
+          - "quyen so huu nha o"
+          - "tai san gan lien voi dat"
+          - "gcn qsdd"
+          - "so do"
+          - "so hong"
+          - "thua dat"
+          - "to ban do"
+
+      - id: dang_ky_xe
+        stt: "IV.2"
+        short_label: "Giấy đăng ký xe"
+        label: "Giấy chứng nhận đăng ký xe ô tô (cà vẹt) của tài sản bảo đảm"
+        requirement:
+          cap_moi: "Bắt buộc với khoản vay có TSBĐ là xe"
+          tai_cap: "Nếu có thay đổi"
+        agents:
+          CREDIT_PROPOSAL_AGENT: {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: R, HO_KINH_DOANH: O}
+          RISK_ASSESSMENT_AGENT: {TIEU_DUNG: O, MUA_NHA: O, MUA_O_TO: R, HO_KINH_DOANH: O}
+        keywords:
+          - "giay chung nhan dang ky xe"
+          - "dang ky xe"
+          - "dang ky o to"
+          - "cavet"
+          - "ca vet"
+          - "bien so"
+
+      - id: chung_thu_dinh_gia
+        stt: "IV.3"
+        short_label: "Chứng thư định giá"
+        label: "Phiếu định giá/Chứng thư thẩm định giá tài sản bảo đảm"
+        requirement:
+          cap_moi: "Bắt buộc với khoản vay có TSBĐ"
+          tai_cap: "Theo định kỳ định giá lại"
+        agents:
+          CREDIT_PROPOSAL_AGENT: {TIEU_DUNG: O, MUA_NHA: R, MUA_O_TO: R, HO_KINH_DOANH: O}
+          RISK_ASSESSMENT_AGENT: {TIEU_DUNG: O, MUA_NHA: R, MUA_O_TO: R, HO_KINH_DOANH: O}
+        keywords:
+          - "chung thu tham dinh gia"
+          - "chung thu dinh gia"
+          - "phieu dinh gia"
+          - "bien ban dinh gia"
+          - "bao cao dinh gia"
+          - "ket qua dinh gia"
+          - "tham dinh gia"
+
+      - id: tai_san_bao_dam_khac
+        stt: "IV.4"
+        short_label: "Hồ sơ tài sản bảo đảm khác"
+        label: >-
+          Hợp đồng thế chấp/cầm cố, sổ tiết kiệm cầm cố, hợp đồng bảo hiểm tài
+          sản bảo đảm và các giấy tờ tài sản bảo đảm khác
+        requirement:
+          cap_moi: "Không bắt buộc"
+          tai_cap: "Không bắt buộc"
+        agents:
+          CREDIT_PROPOSAL_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "hop dong the chap"
+          - "hop dong cam co"
+          - "tai san bao dam"
+          - "tai san the chap"
+          - "tsbd"
+          - "cam co"
+          - "the chap"
+          - "bao hiem tai san"
+          - "bao hiem vat chat xe"
+          - "collateral"
+
+  # ===========================================================================
+  - id: ho_so_noi_bo
+    stt: "V"
+    label: "Hồ sơ nội bộ"
+    primary_agent: CREDIT_RELATIONSHIP_AGENT
+    types:
+
+      - id: cic_khach_hang_vay
+        stt: "V.1"
+        short_label: "Báo cáo CIC khách hàng vay"
+        label: "Báo cáo thông tin tín dụng CIC của khách hàng vay"
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        cic_s10a_extraction: true
+        # Income analysis reads it to net existing debt payments off the income
+        # (DSR); credit proposal to size the new loan against them.
+        agents:
+          CREDIT_RELATIONSHIP_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+          INCOME_ANALYSIS_AGENT: O
+        keywords:
+          - "bao cao thong tin tin dung"
+          - "bao cao tin dung ca nhan"
+          - "thong tin cic"
+          - "bao cao cic"
+          - "cic"
+          - "trung tam thong tin tin dung"
+          - "quan he tin dung"
+          - "lich su tin dung"
+          - "nhom no"
+          - "no qua han"
+          - "no xau"
+          - "du no the tin dung"
+          - "diem tin dung"
+          - "credit bureau"
+          - "credit score"
+
+      - id: cic_tai_san_bao_dam
+        stt: "V.2"
+        short_label: "Thông tin CIC tài sản bảo đảm"
+        label: "Thông tin CIC Tài sản bảo đảm của Khách hàng vay"
+        cic_r21_extraction: true
+        requirement:
+          cap_moi: "Không bắt buộc"
+          tai_cap: "Không bắt buộc"
+        agents:
+          CREDIT_RELATIONSHIP_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "thong tin cic tai san bao dam"
+          - "cic tai san bao dam"
+          - "cic tsbd"
+          # Anchored on section 2 of the R20/R21 report rather than its bold
+          # title, which OCR often misreads.
+          - "dam bao tien vay cua khach hang"
+          - "danh sach tai san bao dam"
+          - "chi tiet ve bao dam tien vay"
+          - "ma so tai san"
+          - "ngay bao cao tai san gan nhat"
+          - "ngay the chap"
+          - "ngay giai chap"
+
+      - id: cic_nguoi_dong_vay
+        stt: "V.3"
+        short_label: "Thông tin CIC người đồng vay, bảo lãnh"
+        label: >-
+          Báo cáo CIC của vợ/chồng, người đồng vay, người bảo lãnh (nếu có)
+        requirement:
+          cap_moi: "Bắt buộc nếu có người đồng vay"
+          tai_cap: "Bắt buộc nếu có người đồng vay"
+        # Deliberately NOT extracted: a second S10A-style record would be merged
+        # into the borrower's own debt chart and DSR as if it were theirs.
+        agents:
+          CREDIT_RELATIONSHIP_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "cic nguoi dong vay"
+          - "cic dong vay"
+          - "cic vo"
+          - "cic chong"
+          - "cic vo chong"
+          - "cic nguoi bao lanh"
+          - "cic nguoi hon phoi"
+
+  # ===========================================================================
+  - id: ho_so_soan_thao_noi_bo
+    stt: "VI"
+    label: "Hồ sơ soạn thảo nội bộ"
+    primary_agent: CUSTOMER_PROFILE_AGENT
+    types:
+
+      - id: bao_cao_tham_dinh
+        stt: "VI.1"
+        short_label: "Báo cáo thẩm định, xác minh khách hàng"
+        label: >-
+          Báo cáo thẩm định/biên bản xác minh thực tế khách hàng cá nhân (nơi
+          cư trú, nơi làm việc/kinh doanh, nguồn thu nhập, tài sản bảo đảm) và
+          đề xuất cấp tín dụng của cán bộ quan hệ khách hàng
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        sitevisit_extraction: true
+        agents:
+          CUSTOMER_PROFILE_AGENT: R
+          INCOME_ANALYSIS_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bao cao tham dinh"
+          - "bao cao xac minh"
+          - "bien ban xac minh"
+          - "xac minh thuc te"
+          - "xac minh noi o"
+          - "xac minh noi lam viec"
+          - "tham dinh thuc te"
+          - "bien ban kiem tra thuc te"
+          - "to trinh cap tin dung"
+          - "to trinh tham dinh"
+          - "bao cao de xuat cap tin dung"
+          - "site visit"

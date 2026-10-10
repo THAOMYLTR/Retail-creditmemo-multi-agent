@@ -1,0 +1,96 @@
+# =============================================================================
+# RETAIL LOAN PRODUCT POLICY — limits used by the deterministic calculators
+# =============================================================================
+# Every figure below is a DEFAULT PLACEHOLDER, not a regulation and not any
+# particular bank's policy. Replace them with your institution's current credit
+# policy before relying on the output. They are kept in one file, keyed by the
+# same product ids as src/matrix/document_matrix.yaml, so that changing a limit
+# is a YAML edit and never a code change.
+#
+# Whatever the calculators take from here is labelled "chính sách" (policy) in
+# the tables the agents receive, so the memo can never present a policy
+# assumption as a fact read off the customer's paperwork.
+#
+# Units: ratios are 0.0-1.0, money is in đồng, tenors are in months, ages in
+# years, interest rates in % per year.
+# =============================================================================
+
+version: 1
+
+# Applied when the request names no product. The strictest reading of each
+# limit is used (lowest DSR/LTV cap, shortest tenor...), so an unnamed product
+# can only make the result more conservative, never looser.
+defaults:
+  # Monthly living-cost floor used when the application declares less (or
+  # nothing). Per adult earner/member, and per dependant.
+  living_cost_per_adult: 5000000
+  living_cost_per_dependant: 3000000
+  # Monthly payment assumed for a credit card when CIC shows a card but the
+  # application declares no card payment: this share of the card LIMIT (or of
+  # the balance when no limit is printed).
+  card_payment_rate: 0.05
+  # Remaining term assumed for an existing CIC loan whose monthly payment the
+  # application does not declare, by the CIC "khoản mục" bucket.
+  assumed_remaining_months_short_term: 12
+  assumed_remaining_months_long_term: 60
+  # Annual rate used to stress the new loan's instalment when the application
+  # states no rate.
+  stress_rate_pct_year: 12.0
+  # How much of each kind of evidenced monthly income is recognised for the
+  # DSR. Salary paid into an account is counted in full; income that is less
+  # predictable or harder to verify is discounted.
+  income_recognition:
+    luong: 1.0
+    huu_tri: 1.0
+    cho_thue: 0.8
+    kinh_doanh: 0.7
+    khac: 0.5
+  # Months of evidence wanted per income source. Fewer is flagged, not refused.
+  min_income_months: 3
+  # How many recent months are averaged into the recognised income.
+  income_lookback_months: 6
+  # A month this far below the average is flagged as income instability.
+  income_drop_alert: 0.3
+
+products:
+  TIEU_DUNG:
+    label: "Vay tiêu dùng tín chấp"
+    max_dsr: 0.50
+    max_ltv: null            # unsecured
+    min_own_contribution: null
+    max_tenor_months: 60
+    max_age_at_maturity: 60
+    max_amount: 500000000
+    # Unsecured cap expressed as a multiple of recognised monthly income.
+    max_income_multiple: 12
+    min_monthly_income: 7000000
+  MUA_NHA:
+    label: "Vay mua nhà / bất động sản"
+    max_dsr: 0.60
+    max_ltv: 0.70
+    min_own_contribution: 0.30
+    max_tenor_months: 300
+    max_age_at_maturity: 70
+    max_amount: null
+    max_income_multiple: null
+    min_monthly_income: 10000000
+  MUA_O_TO:
+    label: "Vay mua ô tô"
+    max_dsr: 0.60
+    max_ltv: 0.70
+    min_own_contribution: 0.30
+    max_tenor_months: 96
+    max_age_at_maturity: 65
+    max_amount: null
+    max_income_multiple: null
+    min_monthly_income: 10000000
+  HO_KINH_DOANH:
+    label: "Vay hộ kinh doanh"
+    max_dsr: 0.60
+    max_ltv: 0.70
+    min_own_contribution: 0.20
+    max_tenor_months: 84
+    max_age_at_maturity: 65
+    max_amount: null
+    max_income_multiple: null
+    min_monthly_income: 10000000
