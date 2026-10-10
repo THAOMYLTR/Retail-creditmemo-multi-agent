@@ -8,9 +8,7 @@ then runs OCR → document classification → structured extraction → determin
 affordability and loan-sizing calculations → specialist agents, and composes a complete
 **Credit Memo (tờ trình thẩm định)**, with guardrails along the way.
 
-This is the retail adaptation of
-[hodongtu/SME-creditmemo-multi-agent](https://github.com/hodongtu/SME-creditmemo-multi-agent).
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for exactly what changed.
+This is the retail adaptation from SME Creditmemo Multi Agent that applied successfully for POC before.
 
 The entry point is the notebook [local_underwriting_agents.ipynb](local_underwriting_agents.ipynb);
 all agent logic lives in the importable package [src/](src/).
