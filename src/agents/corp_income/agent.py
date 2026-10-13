@@ -27,7 +27,7 @@ from typing import Any
 from src.agents.corp_income.checks import parse_date, run_all_checks
 from src.agents.corp_income.documents import PASSES, classify
 from src.agents.corp_income.extraction import build_chains, extract_document, normalize_amounts
-from src.agents.corp_income.report import render_markdown
+from src.agents.corp_income.report import load_template, render_markdown, unknown_placeholders
 from src.utils.common import SUPPORTED_EXTENSIONS
 
 AGENT_NAME = "CORP_INCOME_AGENT"
@@ -76,6 +76,9 @@ class CorpIncomeAgent:
     max_workers: int = 3
     max_chars_per_document: int = 120_000
     ocr_timeout_seconds: float | None = None
+    # Report layout. None = src/templates/corp-income-structure.md if it exists,
+    # otherwise the built-in layout (report.DEFAULT_TEMPLATE).
+    template_path: str | None = None
     _chains: dict[str, Any] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -185,6 +188,7 @@ class CorpIncomeAgent:
         records += self._provided_records("internal", internal_data)
         records += self._provided_records("external", external_data)
 
+        template_text, template_source = load_template(self.template_path)
         items = run_all_checks(records, as_of=as_of, borrower_names=borrower_names, watchlist=watchlist)
         result = CorpIncomeResult(
             meta={
@@ -194,10 +198,13 @@ class CorpIncomeAgent:
                 "has_internal_data": bool(internal_data),
                 "has_external_data": bool(external_data),
                 "watchlist_size": len(watchlist or []),
+                "template": template_source,
+                "unknown_placeholders": unknown_placeholders(template_text),
             },
             documents=documents,
             records=records,
             items=items,
         )
-        result.markdown = render_markdown({"meta": result.meta, "documents": documents, "items": items})
+        result.markdown = render_markdown({"meta": result.meta, "documents": documents, "items": items},
+                                          template_text)
         return result

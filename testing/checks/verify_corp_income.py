@@ -182,6 +182,22 @@ for heading in ("## 1.", "## 2.", "## 3.", "## 4.", "## Hồ sơ đã xử lý")
     expect(heading in md, f"báo cáo có '{heading}'")
 expect(result.to_dict()["items"]["1"]["title"].startswith("Thông tin cơ bản"), "JSON serialisable")
 
+print("\n8b. Template báo cáo (src/templates/corp-income-structure.md)")
+from src.agents.corp_income.report import (DEFAULT_TEMPLATE, TEMPLATE_PATH, load_template,
+                                           placeholder_names, render_markdown, unknown_placeholders)
+expect(TEMPLATE_PATH.is_file(), "có file template mẫu trong src/templates")
+expect(not unknown_placeholders(TEMPLATE_PATH.read_text(encoding="utf-8")), "template mẫu chỉ dùng placeholder hợp lệ")
+expect(result.meta["template"].endswith("corp-income-structure.md"), "agent dùng template trong src/templates")
+expect("<!--" not in md, "ghi chú trong template không lọt vào báo cáo")
+builtin = render_markdown({"meta": result.meta, "documents": result.documents, "items": result.items}, DEFAULT_TEMPLATE)
+expect(md.strip() == builtin.strip(), "template mẫu cho kết quả giống bố cục mặc định")
+custom = "MST: {{tax_code}} ({{tax_code_source}})\nKết luận 2: {{item2_conclusion}}\nSai: {{khong_co}}"
+rendered = render_markdown({"meta": result.meta, "documents": result.documents, "items": result.items}, custom)
+expect(rendered.startswith("MST: 0101234568 (tra_cuu_masothue.txt"), "template tùy chỉnh điền đúng MST + nguồn")
+expect(rendered.endswith("Sai: —"), "placeholder lạ → '—'")
+expect(unknown_placeholders(custom) == ["khong_co"], "placeholder lạ được liệt kê")
+expect(len(placeholder_names()) >= 50, f"{len(placeholder_names())} placeholder")
+
 print("\n9. Không có LLM → không sập, ghi lỗi")
 bare = CorpIncomeAgent().run(texts={"GCN_DKDN_ABC.pdf": "x"}, loan_date="13/10/2026")
 expect(bare.documents[0]["errors"].get("legal_basic", "").startswith("No corp_income"), "lỗi thiếu LLM được ghi lại")

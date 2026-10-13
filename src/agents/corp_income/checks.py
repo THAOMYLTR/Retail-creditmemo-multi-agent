@@ -413,7 +413,7 @@ def check_legal_basic(records, as_of: date, watchlist) -> dict[str, Any]:
             value = LEGAL_FORM_LABELS.get(value, value)
         elif isinstance(value, list):
             value = ", ".join(str(v.get("name") if isinstance(v, dict) else v) for v in value)
-        summary[label] = {"value": value, "source": cite}
+        summary[label] = {"field": key, "value": value, "source": cite}
 
     return {
         "summary": summary,

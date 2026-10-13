@@ -43,7 +43,7 @@ external > customer > field > internal, and the finding lists every source.
 | `prompts.py` | One extraction prompt + JSON schema per BRD item |
 | `extraction.py` | Runs the passes, scales money to đồng from `source_unit` |
 | `checks.py` | All B6 checks (dates, matching, sums, 12-month windows, watchlist) |
-| `report.py` | Markdown report in the BRD template layout |
+| `report.py` | Fills the report template (`src/templates/corp-income-structure.md`) |
 | `agent.py` | `CorpIncomeAgent.run(...)` orchestration |
 | `__main__.py` | Command line |
 
@@ -130,6 +130,45 @@ a GCN ĐKDN runs 3 passes, a tax notice 1, a site-visit report 4.
 `internal_data` / `external_data` use the pass names as keys (`legal_basic`,
 `shareholders`, `legal_rep`, `liabilities`) and the same JSON shape the prompts in
 `prompts.py` return; amounts follow their own `source_unit` (default đồng).
+
+## Report template
+
+The report layout is the Markdown file **`src/templates/corp-income-structure.md`**, next
+to the retail agents' templates. Replace it with your own layout; no Python change needed.
+
+- Write a placeholder as a name in double curly braces, e.g. `{{tax_code}}`. The agent
+  fills it from the extraction and the checks. The template only decides layout and
+  wording, so every figure still comes from a document.
+- `<!-- ... -->` notes in the template are removed from the report.
+- An unknown name renders as `—` and is listed in `result.meta["unknown_placeholders"]`
+  (and in the supervisor's step log), so a typo is visible.
+- Delete the file to fall back to the built-in layout (`report.DEFAULT_TEMPLATE`), or pass
+  `CorpIncomeAgent(template_path=...)` to use a file elsewhere.
+- There is no `corp-income-guidance.md`: no LLM writes this report, so there is nothing for
+  analysis rules to steer.
+
+| Group | Placeholders |
+|---|---|
+| General | `as_of`, `borrowers`, `summary_table`, `documents_table`, `scope_note` |
+| Item 1 — blocks | `item1_title`, `item1_table`, `item1_findings`, `item1_conclusion` |
+| Item 1 — single fields (each also has `<name>_source`) | `company_name`, `company_name_foreign`, `abbreviation`, `tax_code`, `legal_form`, `establishment_date`, `registration_change_number`, `latest_change_date`, `charter_capital`, `head_office_address`, `legal_representatives`, `operating_status` |
+| Item 2 | `item2_title`, `members_table`, `borrower_ownership`, `item2_findings`, `item2_conclusion` |
+| Item 3 | `item3_title`, `legal_rep_table`, `actual_operator`, `item3_findings`, `item3_conclusion` |
+| Item 4 | `item4_title`, `tax_debts_table`, `social_insurance_debts_table`, `administrative_penalties_table`, `enforcement_actions_table`, `disputes_table`, `item4_findings`, `item4_conclusion` |
+
+`*_table` placeholders render a whole Markdown table; `*_findings` render the 🔴/🟠/🔵/🟢
+list with evidence; `*_conclusion` is one line.
+
+Check a template before running it:
+
+```python
+from pathlib import Path
+from src.agents.corp_income.report import unknown_placeholders
+print(unknown_placeholders(Path("src/templates/corp-income-structure.md").read_text()))  # [] = all good
+```
+
+If your template needs a field that is not in the list (a new BRD field), add it to the
+prompt schema in `prompts.py` and one line in `build_context` in `report.py`.
 
 ## Known limits (POC)
 
