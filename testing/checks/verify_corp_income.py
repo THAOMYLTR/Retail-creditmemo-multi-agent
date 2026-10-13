@@ -181,6 +181,8 @@ md = result.markdown
 for heading in ("## 1.", "## 2.", "## 3.", "## 4.", "## Hồ sơ đã xử lý"):
     expect(heading in md, f"báo cáo có '{heading}'")
 expect(result.to_dict()["items"]["1"]["title"].startswith("Thông tin cơ bản"), "JSON serialisable")
+expect(all(d["content"] == "nội dung OCR" for d in result.to_dict()["documents"]),
+       "văn bản OCR của từng file được lưu trong kết quả (documents[].content)")
 
 print("\n8b. Template báo cáo (src/templates/corp-income-structure.md)")
 from src.agents.corp_income.report import (DEFAULT_TEMPLATE, TEMPLATE_PATH, load_template,
