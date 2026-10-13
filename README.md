@@ -97,6 +97,7 @@ flowchart TD
     B -->|blocked| E1([END])
     B -->|continue| C[discover_documents<br/>PDF/XLSX/CSV/TXT/MD/JPG/PNG/TIFF]
     C -->|out of scope: no docs, no task| E3([END])
+    C -->|corporate legal request| K[single_corp_income<br/>corp_income agent] --> E4([END])
     C -->|continue| D[classify_documents<br/>OCR + matrix routing + product detection]
     D --> F[decide_workflow<br/>route + workflow_mode]
     F --> G[evidence_gap_check<br/>no proof of income → stop]
@@ -209,7 +210,9 @@ totals, borrower's recent capital acquisition, representative changes, open debt
 python -m src.agents.corp_income path/to/khdn_dossier --loan-date 13/10/2026 --borrower "Nguyễn Văn A"
 ```
 
-It does not change the retail pipeline. Details: [docs/CORP_INCOME.md](docs/CORP_INCOME.md).
+It is wired into the supervisor as its own route: a request such as *"Kiểm tra pháp lý
+doanh nghiệp"* goes straight from file discovery to the `single_corp_income` node, so
+retail runs are unchanged. Details: [docs/CORP_INCOME.md](docs/CORP_INCOME.md).
 
 ---
 

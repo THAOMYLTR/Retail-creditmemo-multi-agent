@@ -13,6 +13,9 @@ AgentName = Literal[
     "CREDIT_PROPOSAL_AGENT",
     "RISK_ASSESSMENT_AGENT",
     "CREDIT_MEMO",
+    # Corporate (KHDN) legal information, BRD Corp Income items 1-4.
+    # Runs its own pipeline: src/agents/corp_income/.
+    "CORP_INCOME_AGENT",
 ]
 WorkflowMode = Literal[
     "single_customer_profile",
@@ -21,6 +24,7 @@ WorkflowMode = Literal[
     "single_risk_assessment",
     "single_credit_proposal",
     "full_credit_memo",
+    "single_corp_income",
 ]
 DocumentAgentName = Literal[
     "INCOME_ANALYSIS_AGENT",
@@ -146,6 +150,10 @@ class UnderwritingGraphState(TypedDict, total=False):
     web_context: str
     steps: list[str]
     output_state: dict[str, Any]
+    # Options for the corp_income route (loan_date, borrower_names,
+    # internal_data, external_data, watchlist, type_overrides) — passed to
+    # CorpIncomeAgent.run as keyword arguments. Ignored by every retail route.
+    corp_income_options: dict[str, Any]
 
 
 def to_dict_list(items: list[Any]) -> list[dict[str, Any]]:

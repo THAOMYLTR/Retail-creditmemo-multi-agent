@@ -95,6 +95,28 @@ result.save("logs/corp_income")            # corp_income_report.md + corp_income
 print(result.items[1]["conclusion"])
 ```
 
+Through the supervisor (same entry point as the retail agents):
+
+```python
+result = sup.process(
+    "Kiểm tra pháp lý doanh nghiệp",          # any CORP_INCOME_ROUTE_KEYWORDS phrase
+    ["/Workspace/.../khdn_abc/"],
+    corp_income_options={                      # optional, passed to CorpIncomeAgent.run
+        "loan_date": "13/10/2026",
+        "borrower_names": ["Nguyễn Văn A"],
+    },
+)
+result["response"]      # Markdown report
+result["corp_income"]   # full structured result (documents, records, findings per item)
+```
+
+The request is recognised right after file discovery and goes straight to the
+`single_corp_income` node: the retail classifier, evidence-gap check, extraction passes
+and memo finalisation are skipped. Trigger phrases (accent-insensitive) are in
+`CORP_INCOME_ROUTE_KEYWORDS` in `supervisor.py` — e.g. "pháp lý doanh nghiệp", "KHDN",
+"corp income", "thành viên góp vốn", "người đại diện theo pháp luật". Bare "nợ thuế" or
+"cổ đông" do not trigger it, so a retail question about taxes stays on the retail route.
+
 Command line:
 
 ```bash
@@ -117,8 +139,8 @@ a GCN ĐKDN runs 3 passes, a tax notice 1, a site-visit report 4.
   external source — or pass the API result as `external_data`.
 - **Fraud detection** (tampered documents) is out of scope; AML/BL/WL is only a match
   against the `watchlist` you pass in.
-- Not yet a node of the retail supervisor graph. To plug it in, call
-  `CorpIncomeAgent.run` from a node and add its Markdown to the memo context.
+- Its report is not merged into the retail credit memo; the corporate route returns it
+  on its own.
 
 ## Test
 
