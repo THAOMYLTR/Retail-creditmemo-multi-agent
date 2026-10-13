@@ -65,11 +65,15 @@ def run_supervisor_with_optional_trace(
     query: str,
     input_paths: list[str],
     conversation_history: list[dict[str, str]],
+    corp_income_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the supervisor with an optional LangSmith root trace."""
 
     if not RUN_LANGSMITH_TRACE or traceable is None:
-        return supervisor.process(query, input_paths, conversation_history)
+        return supervisor.process(
+            query, input_paths, conversation_history,
+            corp_income_options=corp_income_options,
+        )
 
     @traceable(name=LANGSMITH_RUN_NAME, run_type="chain")
     def _run_traced_workflow(
@@ -83,6 +87,7 @@ def run_supervisor_with_optional_trace(
             traced_query,
             traced_input_paths,
             traced_conversation_history,
+            corp_income_options=corp_income_options,
         )
 
     return _run_traced_workflow(query, input_paths, conversation_history)

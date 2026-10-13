@@ -413,7 +413,7 @@ def check_legal_basic(records, as_of: date, watchlist) -> dict[str, Any]:
             value = LEGAL_FORM_LABELS.get(value, value)
         elif isinstance(value, list):
             value = ", ".join(str(v.get("name") if isinstance(v, dict) else v) for v in value)
-        summary[label] = {"value": value, "source": cite}
+        summary[label] = {"field": key, "value": value, "source": cite}
 
     return {
         "summary": summary,
@@ -669,7 +669,12 @@ def check_legal_rep(records, as_of: date, watchlist) -> dict[str, Any]:
             "actual_operator": {**operator, "source": operator_cite} if operator else None,
         },
         "findings": findings,
-        "conclusion": _conclude(findings, "Người đại diện khớp đúng, ổn định; trùng người điều hành thực tế"),
+        "conclusion": _conclude(
+            findings,
+            "Người đại diện khớp đúng, ổn định; "
+            + ("trùng người điều hành thực tế" if operator
+               else "chưa có thông tin người điều hành thực tế"),
+        ),
     }
 
 

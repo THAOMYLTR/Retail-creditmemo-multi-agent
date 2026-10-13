@@ -1125,6 +1125,12 @@ class Supervisor:
         )
         if failed:
             steps.append(f"corp_income: errors on {', '.join(failed)}")
+        steps.append(f"corp_income: report template = {result.meta['template']}")
+        if result.meta["unknown_placeholders"]:
+            steps.append(
+                "corp_income: unknown template placeholders rendered as '—': "
+                + ", ".join(result.meta["unknown_placeholders"])
+            )
         rate_limit = shared_rate_limiter().snapshot()
         steps.append(
             f"LLM: {rate_limit['llm_calls']} calls at a "
