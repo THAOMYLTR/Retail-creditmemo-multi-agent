@@ -51,6 +51,7 @@ flow diagram (`utils/flow.py`).
 | `src/agents/prompt_blocks.py` | Renders every structured block into the agents' prompts, builds the chart |
 | `src/agents/specialist.py` | The five specialists and the memo composer |
 | `src/templates/*-structure.md` / `*-guidance.md` | Report layout (copied) / analysis rules (never copied) per agent |
+| `src/agents/corp_income/` | **Corporate (KHDN)** legal-information agent, BRD items 1–4 — standalone, see `docs/CORP_INCOME.md` |
 | `src/agents/tools.py` | Allow-listed SQL tools over retail tables (customer, income, CASA, T24, cards, CIC, collateral) |
 
 ## Two rules that shape the design

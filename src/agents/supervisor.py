@@ -81,6 +81,7 @@ from src.agents.sitevisit_extraction import (
     extract_sitevisit_structured_data,
 )
 from src.agents import prompt_blocks
+from src.agents.corp_income import CorpIncomeAgent
 from src.agents.specialist import (
     CustomerProfileAnalysis,
     CreditMemoComposerAgent,
@@ -253,6 +254,28 @@ CREDIT_RELATIONSHIP_ROUTE_KEYWORDS = [
     "nhóm nợ",
     "tổ chức tín dụng",
 ]
+# Requests for the corporate (KHDN) legal-information agent. Matched on
+# accent-stripped text (normalize_text) so "phap ly doanh nghiep" works as well
+# as the accented form. Checked BEFORE every retail route and right after file
+# discovery: a corporate dossier must never reach the retail classifier or the
+# retail evidence-gap check, which would stop it for missing proof of income.
+CORP_INCOME_ROUTE_KEYWORDS = [
+    "corp income",
+    "corp_income",
+    "corporate legal",
+    "phap ly doanh nghiep",
+    "khach hang doanh nghiep",
+    "khdn",
+    "gcn dkdn",
+    "dang ky doanh nghiep",
+    "co cau co dong",
+    "thanh vien gop von",
+    "nguoi dai dien phap luat",
+    "nguoi dai dien theo phap luat",
+]
+# Deliberately absent: bare "cổ đông", "nợ thuế", "nợ BHXH". A retail question
+# ("khách hàng có nợ thuế TNCN không?") can contain them, and this route is
+# checked first — a false match here would take a retail file off its pipeline.
 VIETNAMESE_CHARS = set(
     "ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệ"
     "íìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ"
@@ -382,6 +405,9 @@ class Supervisor:
             "CREDIT_PROPOSAL_AGENT",
             "RISK_ASSESSMENT_AGENT",
         ),
+        # Runs its own OCR/classification/extraction (src/agents/corp_income),
+        # so no retail extraction pass is needed for it.
+        "CORP_INCOME_AGENT": ("CORP_INCOME_AGENT",),
     }
 
     # Where to anchor the debt/income chart, most specific first. The composer
@@ -454,6 +480,11 @@ class Supervisor:
             if config.sitevisit_extraction_llm
             else None
         )
+        self.corp_income_agent = CorpIncomeAgent(
+            llm=config.corp_income_extraction_llm,
+            max_workers=config.max_concurrency,
+            max_chars_per_document=config.max_chars_per_document,
+        )
         self.workflow_graph = self._build_workflow_graph()
 
     def _build_workflow_graph(self):
@@ -489,6 +520,7 @@ class Supervisor:
             self._graph_run_credit_proposal,
         )
         workflow.add_node("full_credit_memo", self._graph_run_credit_memo)
+        workflow.add_node("single_corp_income", self._graph_run_corp_income)
 
         workflow.set_entry_point("prepare_input")
         workflow.add_edge("prepare_input", "input_guardrail")
@@ -500,7 +532,11 @@ class Supervisor:
         workflow.add_conditional_edges(
             "discover_documents",
             self._graph_after_discover_documents,
-            {"out_of_scope": END, "continue": "classify_documents"},
+            {
+                "out_of_scope": END,
+                "corp_income": "single_corp_income",
+                "continue": "classify_documents",
+            },
         )
         workflow.add_edge("classify_documents", "decide_workflow")
         workflow.add_edge("decide_workflow", "evidence_gap_check")
@@ -529,6 +565,7 @@ class Supervisor:
             "single_risk_assessment",
             "single_credit_proposal",
             "full_credit_memo",
+            "single_corp_income",
         ]:
             workflow.add_edge(node, END)
         
@@ -597,6 +634,23 @@ class Supervisor:
         )
         steps = state.get("steps", [])
         steps.append(f"Discovered {len(files)} supported file(s)")
+        if self._is_corp_income_request(state.get("query", "")):
+            # Decided here, before any OCR: the corporate route has its own
+            # classifier and checks, and the retail ones would misread the file.
+            steps.append("Selected route: CORP_INCOME_AGENT (corporate legal request)")
+            return {
+                **state,
+                "files": files,
+                "steps": steps,
+                "decision": {
+                    "route": "CORP_INCOME_AGENT",
+                    "workflow_mode": "single_corp_income",
+                    "reasoning": "Deterministic keyword route (corporate legal request).",
+                    "confidence": 1.0,
+                    "requires_credit_memo": False,
+                },
+                "workflow_mode": "single_corp_income",
+            }
         if files or self._has_analysis_intent(state.get("query", "")):
             return {**state, "files": files, "steps": steps}
 
@@ -628,7 +682,18 @@ class Supervisor:
     def _graph_after_discover_documents(state: UnderwritingGraphState) -> str:
         """Stop when there is nothing to analyse and nothing was asked."""
 
-        return "out_of_scope" if state.get("output_state") else "continue"
+        if state.get("output_state"):
+            return "out_of_scope"
+        if state.get("workflow_mode") == "single_corp_income":
+            return "corp_income"
+        return "continue"
+
+    @staticmethod
+    def _is_corp_income_request(query: str) -> bool:
+        """True when the request asks for the corporate legal-information agent."""
+
+        normalized = f" {normalize_text(query)} "
+        return any(f" {keyword} " in normalized for keyword in CORP_INCOME_ROUTE_KEYWORDS)
 
     @classmethod
     def _has_analysis_intent(cls, query: str) -> bool:
@@ -1018,6 +1083,66 @@ class Supervisor:
             ),
         }
 
+    def _graph_run_corp_income(
+        self,
+        state: UnderwritingGraphState,
+    ) -> UnderwritingGraphState:
+        """Run the corporate legal-information agent (BRD Corp Income items 1-4).
+
+        Its report is returned as written, not passed through _finalize: that
+        step converts đồng to triệu VNĐ, consolidates footnotes and inserts the
+        retail debt/income chart, none of which applies to this report — its
+        amounts already carry a unit ("10.000.000.000 đ") and converting them
+        again would garble them. Output guardrails still apply.
+        """
+
+        query = state.get("query", "")
+        steps = list(state.get("steps", []))
+        options = state.get("corp_income_options") or {}
+        try:
+            result = self.corp_income_agent.run(state.get("files") or [], **options)
+        except Exception as exc:  # bad options, e.g. an unknown type override
+            message = f"corp_income không chạy được: {type(exc).__name__}: {exc}"
+            output = self._build_state(
+                query, message, "CORP_INCOME_AGENT", state.get("decision") or {},
+                steps=steps + ["corp_income failed"],
+            )
+            output["status"] = "error"
+            return {**state, "output_state": output}
+
+        response = result.markdown
+        agent_name = "CORP_INCOME_AGENT"
+        if self.guardrails:
+            allowed, response = self.guardrails.check_output(response, query)
+            if not allowed:
+                agent_name = "OUTPUT_GUARDRAILS"
+
+        classified = sum(1 for doc in result.documents if doc["type"] != "khac")
+        failed = [doc["filename"] for doc in result.documents if doc["errors"]]
+        steps.append(
+            f"corp_income: {len(result.documents)} file(s), {classified} classified, "
+            f"{len(result.records)} extraction record(s)"
+        )
+        if failed:
+            steps.append(f"corp_income: errors on {', '.join(failed)}")
+        rate_limit = shared_rate_limiter().snapshot()
+        steps.append(
+            f"LLM: {rate_limit['llm_calls']} calls at a "
+            f"{rate_limit['requests_per_minute']}/min limit"
+        )
+        output = self._build_state(
+            query,
+            response,
+            agent_name,
+            state.get("decision") or {},
+            steps=steps + ["Built final response"],
+            rate_limit=rate_limit,
+        )
+        # Full structured result (documents, records, findings per item) for
+        # monitoring or for writing into a Databricks table.
+        output["corp_income"] = result.to_dict()
+        return {**state, "output_state": output}
+
     def _run_single_agent_branch(
         self,
         state: UnderwritingGraphState,
@@ -1042,13 +1167,20 @@ class Supervisor:
         query: str,
         input_paths: list[str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
+        corp_income_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Run one local notebook request through the agent workflow."""
+        """Run one local notebook request through the agent workflow.
+
+        ``corp_income_options`` only matters on the corporate route — keyword
+        arguments for CorpIncomeAgent.run (loan_date, borrower_names,
+        internal_data, external_data, watchlist, type_overrides).
+        """
 
         initial_state: UnderwritingGraphState = {
             "query": query,
             "input_paths": input_paths or [],
             "conversation_history": conversation_history or [],
+            "corp_income_options": corp_income_options or {},
         }
         result = self.workflow_graph.invoke(initial_state)
         output_state = result.get("output_state")
@@ -1521,6 +1653,7 @@ class Supervisor:
             "RISK_ASSESSMENT_AGENT": "single_risk_assessment",
             "CREDIT_PROPOSAL_AGENT": "single_credit_proposal",
             "CREDIT_MEMO": "full_credit_memo",
+            "CORP_INCOME_AGENT": "single_corp_income",
         }
         return route_modes.get(route, DEFAULT_WORKFLOW_MODE)
 

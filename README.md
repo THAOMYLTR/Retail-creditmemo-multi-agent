@@ -97,6 +97,7 @@ flowchart TD
     B -->|blocked| E1([END])
     B -->|continue| C[discover_documents<br/>PDF/XLSX/CSV/TXT/MD/JPG/PNG/TIFF]
     C -->|out of scope: no docs, no task| E3([END])
+    C -->|corporate legal request| K[single_corp_income<br/>corp_income agent] --> E4([END])
     C -->|continue| D[classify_documents<br/>OCR + matrix routing + product detection]
     D --> F[decide_workflow<br/>route + workflow_mode]
     F --> G[evidence_gap_check<br/>no proof of income → stop]
@@ -196,6 +197,25 @@ names the **binding limit** and shows the instalment, DSR and LTV at that amount
 
 ---
 
+## Corporate legal-information agent (`corp_income`)
+
+A separate agent for **corporate (KHDN)** files covers the BRD *Corp Income Assessment*,
+use case "Pháp lý doanh nghiệp", items 1–4: legal profile, shareholders/members, legal
+representative, and tax/BHXH debts, penalties and disputes. It OCRs GCN ĐKDN, điều lệ,
+sổ cổ đông, quyết định bổ nhiệm, báo cáo thực địa, tax notices and similar papers, then
+runs the BRD's cross-checks in code (exact MST match, changes within 12 months, ownership
+totals, borrower's recent capital acquisition, representative changes, open debts).
+
+```bash
+python -m src.agents.corp_income path/to/khdn_dossier --loan-date 13/10/2026 --borrower "Nguyễn Văn A"
+```
+
+It is wired into the supervisor as its own route: a request such as *"Kiểm tra pháp lý
+doanh nghiệp"* goes straight from file discovery to the `single_corp_income` node, so
+retail runs are unchanged. Details: [docs/CORP_INCOME.md](docs/CORP_INCOME.md).
+
+---
+
 ## Project Structure
 
 ```
@@ -217,12 +237,13 @@ names the **binding limit** and shows the instalment, DSR and LTV at that amount
 │   │   ├── loan_sizing_calculator.py
 │   │   ├── prompt_blocks.py          # structured blocks + debt/income chart
 │   │   ├── guardrails.py, tools.py, tracing.py
+│   │   └── corp_income/              # KHDN legal info (BRD items 1–4) — see docs/CORP_INCOME.md
 │   ├── matrix/document_matrix.yaml   # document type → agents (R/O per product)
 │   ├── policy/retail_products.yaml   # product limits (placeholders — set your policy)
 │   ├── utils/                        # OCR, extractors, formatting (đồng → triệu VNĐ), charts, diagrams…
 │   └── templates/                    # *-structure.md (layout) + *-guidance.md (rules) per agent
 ├── testing/run_checks.py, testing/checks/
-├── docs/ARCHITECTURE.md
+├── docs/ARCHITECTURE.md, docs/CORP_INCOME.md
 ├── .env.example
 └── README.md
 ```
