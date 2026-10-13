@@ -1,0 +1,201 @@
+# =============================================================================
+# CORP INCOME — DOCUMENT TYPES (khách hàng doanh nghiệp, KHDN)
+# =============================================================================
+# Source of truth for the corp_income agent: which corporate document is which,
+# and which BRD extraction pass runs on it. Editing this file changes routing
+# without any Python change. It is deliberately separate from
+# src/matrix/document_matrix.yaml, which describes the RETAIL dossier — mixing
+# corporate papers into that matrix would re-route retail files.
+#
+# BRD "Corp Income Assessment", sheet "Corp income (detail)", items 1-4
+# (use case "Pháp lý doanh nghiệp"):
+#   legal_basic   — mục 1: Thông tin cơ bản về pháp lý doanh nghiệp
+#   shareholders  — mục 2: Cổ đông, thành viên góp vốn
+#   legal_rep     — mục 3: Người đại diện pháp luật
+#   liabilities   — mục 4: Nợ thuế, BHXH, phạt hành chính, tranh chấp
+#
+# --- Fields ------------------------------------------------------------------
+#   id        : technical key, never renamed.
+#   label     : document name as it appears on the checklist.
+#   source    : customer = KH cung cấp | field = báo cáo thực địa (ĐVKD/AI Site
+#               Visit/RBO) | external = bản tra cứu Cổng ĐKDN / cơ quan thuế /
+#               BHXH. Cross-checks compare facts BETWEEN sources, so this tag
+#               matters: two customer papers agreeing proves less than a
+#               customer paper agreeing with the national register.
+#   keywords  : unaccented, lowercase. Filename hits score 3x content hits.
+#   passes    : BRD extraction passes run on this type. EACH pass costs one
+#               LLM call per matching document.
+# =============================================================================
+
+version: 1
+
+types:
+  - id: gcn_dkdn
+    label: "Giấy chứng nhận đăng ký doanh nghiệp (GCN ĐKDN)"
+    source: customer
+    keywords:
+      - giay chung nhan dang ky doanh nghiep
+      - chung nhan dang ky doanh nghiep
+      - dang ky kinh doanh
+      - gcn dkdn
+      - gcndkdn
+      - dkkd
+      - ma so doanh nghiep
+      - dang ky thay doi lan thu
+    passes: [legal_basic, shareholders, legal_rep]
+
+  - id: dieu_le
+    label: "Điều lệ công ty"
+    source: customer
+    keywords:
+      - dieu le cong ty
+      - dieu le to chuc va hoat dong
+      - dieu le
+    passes: [legal_basic, shareholders, legal_rep]
+
+  - id: so_dang_ky_co_dong
+    label: "Sổ đăng ký cổ đông / Sổ đăng ký thành viên / Danh sách thành viên góp vốn"
+    source: customer
+    keywords:
+      - so dang ky co dong
+      - so co dong
+      - so dang ky thanh vien
+      - danh sach co dong
+      - danh sach thanh vien
+      - danh sach co dong sang lap
+      - giay chung nhan phan von gop
+      - so co phan
+    passes: [legal_basic, shareholders]
+
+  - id: chuyen_nhuong_von
+    label: "Hợp đồng / biên bản chuyển nhượng vốn góp, cổ phần"
+    source: customer
+    keywords:
+      - hop dong chuyen nhuong von
+      - chuyen nhuong phan von gop
+      - chuyen nhuong co phan
+      - bien ban thanh ly chuyen nhuong
+    passes: [shareholders]
+
+  - id: quyet_dinh_bo_nhiem
+    label: "Quyết định bổ nhiệm / Nghị quyết, biên bản họp HĐTV-ĐHĐCĐ-HĐQT"
+    source: customer
+    keywords:
+      - quyet dinh bo nhiem
+      - quyet dinh mien nhiem
+      - nghi quyet hoi dong thanh vien
+      - nghi quyet dai hoi dong co dong
+      - nghi quyet hoi dong quan tri
+      - bien ban hop hoi dong
+      - bo nhiem giam doc
+      - bo nhiem tong giam doc
+    passes: [legal_rep, shareholders]
+
+  - id: bao_cao_thuc_dia
+    label: "Báo cáo thực địa / khảo sát (ĐVKD, AI Site Visit, RBO)"
+    source: field
+    keywords:
+      - bao cao thuc dia
+      - bao cao khao sat
+      - khao sat thuc dia
+      - bien ban xac minh
+      - bien ban lam viec
+      - site visit
+      - tham dinh thuc te
+    passes: [legal_basic, shareholders, legal_rep, liabilities]
+
+  - id: tra_cuu_dkdn
+    label: "Bản tra cứu Cổng ĐKDN / cơ quan thuế (masothue, bocaodientu)"
+    source: external
+    keywords:
+      - cong thong tin quoc gia ve dang ky doanh nghiep
+      - dangkykinhdoanh gov vn
+      - bocaodientu
+      - masothue
+      - tra cuu ma so thue
+      - tra cuu thong tin nguoi nop thue
+      - tinh trang hoat dong
+      - trang thai nnt
+    passes: [legal_basic, shareholders, legal_rep]
+
+  - id: thong_bao_no_thue
+    label: "Thông báo nợ thuế / Xác nhận nghĩa vụ thuế"
+    source: customer
+    keywords:
+      - thong bao tien thue no
+      - thong bao no thue
+      - tien thue no
+      - xac nhan nghia vu thue
+      - xac nhan hoan thanh nghia vu thue
+      - tinh hinh thuc hien nghia vu
+      - mau 01 tb no
+    passes: [liabilities]
+
+  - id: tra_cuu_no_thue_bhxh
+    label: "Bản tra cứu nợ thuế / nợ BHXH (cổng thuế, BHXH tỉnh thành)"
+    source: external
+    keywords:
+      - danh sach doanh nghiep no thue
+      - cong khai no thue
+      - no dong bao hiem xa hoi
+      - danh sach don vi no bhxh
+      - tra cuu no bhxh
+    passes: [liabilities]
+
+  - id: xac_nhan_bhxh
+    label: "Thông báo / xác nhận đóng BHXH"
+    source: customer
+    keywords:
+      - bao hiem xa hoi
+      - bhxh
+      - thong bao ket qua dong bhxh
+      - xac nhan dong bao hiem
+      - mau c12
+    passes: [liabilities]
+
+  - id: quyet_dinh_xu_phat
+    label: "Quyết định xử phạt vi phạm hành chính / cưỡng chế"
+    source: customer
+    keywords:
+      - quyet dinh xu phat
+      - xu phat vi pham hanh chinh
+      - bien ban vi pham hanh chinh
+      - quyet dinh cuong che
+      - cuong che thi hanh
+      - qd xu phat
+      - xu phat
+    passes: [liabilities]
+
+  - id: bien_ban_kiem_tra
+    label: "Biên bản kiểm tra / Kết luận thanh tra (thuế, môi trường, PCCC)"
+    source: customer
+    keywords:
+      - bien ban kiem tra
+      - ket luan thanh tra
+      - bien ban thanh tra
+      - kiem tra phong chay chua chay
+      - kiem tra moi truong
+    passes: [liabilities]
+
+  - id: ho_so_tranh_chap
+    label: "Văn bản tranh chấp / hồ sơ tòa án, trọng tài"
+    source: customer
+    keywords:
+      - toa an nhan dan
+      - trong tai thuong mai
+      - thong bao thu ly
+      - ban an
+      - quyet dinh cong nhan su thoa thuan
+      - don khoi kien
+      - tranh chap
+    passes: [liabilities]
+
+  - id: thuyet_minh_bctc
+    label: "Thuyết minh báo cáo tài chính kiểm toán"
+    source: customer
+    keywords:
+      - thuyet minh bao cao tai chinh
+      - ban thuyet minh
+      - bao cao kiem toan doc lap
+      - no tiem tang
+    passes: [liabilities]
