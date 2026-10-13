@@ -116,6 +116,10 @@ class CorpIncomeAgent:
             "passes_done": sorted(results),
             "errors": errors,
             "chars": len(text),
+            # Full OCR / extracted text, kept in the run log like the retail
+            # document_classifications.json, so a wrong field can be traced back
+            # to what the OCR actually read.
+            "content": text,
         }
         records = [
             {"source": doc_class["source"], "document": filename, "document_type": doc_class["type"],
@@ -177,7 +181,8 @@ class CorpIncomeAgent:
                 except Exception as exc:  # one unreadable scan must not end the run
                     return ({"filename": filename, "path": path, "type": "khac", "label": "Không đọc được",
                              "source": "customer", "classification_method": "none", "classification_scores": {},
-                             "passes_done": [], "errors": {"ocr": f"{type(exc).__name__}: {exc}"[:300]}, "chars": 0}, [])
+                             "passes_done": [], "errors": {"ocr": f"{type(exc).__name__}: {exc}"[:300]}, "chars": 0,
+                             "content": ""}, [])
             return self._process(filename, text, overrides.get(filename), path or "")
 
         with ThreadPoolExecutor(max_workers=max(1, min(self.max_workers, len(jobs) or 1))) as pool:
